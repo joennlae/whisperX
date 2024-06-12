@@ -28,13 +28,14 @@ class WhisperModel(faster_whisper.WhisperModel):
     Currently only works in non-timestamp mode and fixed prompt for all samples in batch.
     '''
 
-    def generate_segment_batched(self, features: np.ndarray, tokenizer: faster_whisper.tokenizer.Tokenizer, options: faster_whisper.transcribe.TranscriptionOptions, encoder_output = None):
+    def generate_segment_batched(self, features: np.ndarray, tokenizer: faster_whisper.tokenizer.Tokenizer, options: faster_whisper.transcribe.TranscriptionOptions, encoder_output = None, initial_prompt = None):
         batch_size = features.shape[0]
         all_tokens = []
         prompt_reset_since = 0
-        if options.initial_prompt is not None:
-            initial_prompt = " " + options.initial_prompt.strip()
-            initial_prompt_tokens = tokenizer.encode(initial_prompt)
+        initial_prompt = initial_prompt if initial_prompt is not None else options.initial_prompt
+        if initial_prompt is not None:
+            initial_prompt_temp = " " + initial_prompt.strip()
+            initial_prompt_tokens = tokenizer.encode(initial_prompt_temp)
             all_tokens.extend(initial_prompt_tokens)
         previous_tokens = all_tokens[prompt_reset_since:]
         prompt = self.get_prompt(
@@ -134,9 +135,12 @@ class FasterWhisperPipeline(Pipeline):
 
     def _sanitize_parameters(self, **kwargs):
         preprocess_kwargs = {}
+        forwards_kwargs = {}
         if "tokenizer" in kwargs:
             preprocess_kwargs["maybe_arg"] = kwargs["maybe_arg"]
-        return preprocess_kwargs, {}, {}
+        if "initial_prompt" in kwargs:
+            forwards_kwargs["initial_prompt"] = kwargs["initial_prompt"]
+        return preprocess_kwargs, forwards_kwargs, {}
 
     def preprocess(self, audio):
         audio = audio['inputs']
@@ -148,8 +152,11 @@ class FasterWhisperPipeline(Pipeline):
         )
         return {'inputs': features}
 
-    def _forward(self, model_inputs):
-        outputs = self.model.generate_segment_batched(model_inputs['inputs'], self.tokenizer, self.options)
+    def _forward(self, model_inputs, **kwargs):
+        initial_prompt = None
+        if "initial_prompt" in kwargs:
+            initial_prompt = kwargs["initial_prompt"]
+        outputs = self.model.generate_segment_batched(model_inputs['inputs'], self.tokenizer, self.options, initial_prompt=initial_prompt)
         return {'text': outputs}
 
     def postprocess(self, model_outputs):
@@ -171,7 +178,7 @@ class FasterWhisperPipeline(Pipeline):
         return final_iterator
 
     def transcribe(
-        self, audio: Union[str, np.ndarray], batch_size=None, num_workers=0, language=None, task=None, chunk_size=30, print_progress = False, combined_progress=False
+        self, audio: Union[str, np.ndarray], batch_size=None, num_workers=0, language=None, task=None, chunk_size=30, print_progress = False, combined_progress=False, initial_prompt=None
     ) -> TranscriptionResult:
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -215,7 +222,7 @@ class FasterWhisperPipeline(Pipeline):
         segments: List[SingleSegment] = []
         batch_size = batch_size or self._batch_size
         total_segments = len(vad_segments)
-        for idx, out in enumerate(self.__call__(data(audio, vad_segments), batch_size=batch_size, num_workers=num_workers)):
+        for idx, out in enumerate(self.__call__(data(audio, vad_segments), batch_size=batch_size, num_workers=num_workers, initial_prompt=initial_prompt)):
             if print_progress:
                 base_progress = ((idx + 1) / total_segments) * 100
                 percent_complete = base_progress / 2 if combined_progress else base_progress
