@@ -117,8 +117,6 @@ def first_part_of_segment_processing(segment, model_type, model, processor, audi
     else:
         lengths = None
         
-    print("MODEL TYPE", model_type)
-    
     with torch.inference_mode():
         if model_type == "torchaudio":
             emissions, _ = model(waveform_segment.to(device), lengths=lengths)
@@ -373,8 +371,6 @@ def align(
         segment["sentence_spans"] = sentence_spans
 
     aligned_segments: List[SingleAlignedSegment] = []
-
-    print("MODEL TYPE", model_type)
 
     transcript_and_emission = []
 
